@@ -80,4 +80,19 @@ void loop() {
       delay(300);
     }
   }
+   if(btnBlue.pressed())
+  {
+    for (int i = 0; i < 9; i++)
+    {
+      digitalWrite(LED_PNK, HIGH);
+      delay(500);
+      digitalWrite(LED_PNK, LOW);
+      delay(500);
+      digitalWrite(LED_GRN, HIGH);
+      delay(500);
+      digitalWrite(LED_GRN, LOW);
+      delay(500);
+
+    } 
+  }
 }
