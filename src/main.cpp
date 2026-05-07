@@ -1,165 +1,128 @@
-#include <Arduino.h>            // Grundfunktionen des Arduino
-#include <Wire.h>              // Für I2C Kommunikation
-#include <LiquidCrystal_I2C.h> // LCD über I2C ansteuern
+#include <Arduino.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
-// LCD initialisieren: Adresse 0x27, 16 Zeichen, 2 Zeilen
+// ================= LCD =================
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // ================= PINS =================
-const int buttonPin = 2; // Button zum Starten
-const int pulsePin = A0; // Pulssensor (Herzfrequenz)
-const int gsrPin = A1;   // GSR Sensor (Hautwiderstand)
+const int buttonStart = 2;   // Start Baseline
+const int buttonAnswer = 3;  // Antwort Taste (Ja/Nein)
+const int ledPin = 4;        // LED für Messung
 
-// ================= ZUSTÄNDE =================
-// Zustandsmaschine für Programmablauf
+const int pulsePin = A0;
+const int gsrPin = A1;
+
+// ================= STATES =================
 enum State {
-  IDLE,              // Wartet auf Start
-  BASELINE,          // Grundwerte messen
-  WAIT_QUESTION,     // Warten auf Frage
-  WAIT_ANSWER,       // Warten auf Antwort
-  MEASURE_RESPONSE,  // Reaktion messen
-  RESULT             // Ergebnis anzeigen
+  IDLE,
+  BASELINE,
+  WAIT_ANSWER,
+  MEASURE,
+  RESULT
 };
 
-// aktueller Zustand
 State currentState = IDLE;
 
 // ================= BUTTON =================
-int lastButtonState = HIGH; // letzter Zustand (für Flankenerkennung)
+int lastStartState = HIGH;
+int lastAnswerState = HIGH;
 
 // ================= WERTE =================
-int baselineBPM = 0;   // Ruhe-Herzfrequenz
-float baselineGSR = 0; // Ruhe-GSR
+int baselineBPM = 0;
+float baselineGSR = 0;
 
-int currentBPM = 0;    // aktuelle Herzfrequenz
-float currentGSR = 0;  // aktueller GSR
+int currentBPM = 0;
+float currentGSR = 0;
 
 // ================= PULS =================
-unsigned long lastBeat = 0; // Zeitpunkt des letzten Herzschlags
-
-// ================= SERIAL =================
-String inputString = ""; // Eingaben vom PC
-
-// ================= FUNKTIONSDEKLARATION =================
-void showIdle();
-void handleButton();
-void readSerial();
-void measureBaseline();
-void measureResponse();
-void showResult();
-int readPulse();
-float readGSR();
+unsigned long lastBeat = 0;
 
 // ================= SETUP =================
 void setup() {
 
-  // Button als Input mit internem Pullup-Widerstand
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonStart, INPUT_PULLUP);
+  pinMode(buttonAnswer, INPUT_PULLUP);
+  pinMode(ledPin, OUTPUT);
 
-  // LCD starten
   lcd.init();
   lcd.backlight();
 
-  // Serielle Verbindung starten
   Serial.begin(9600);
 
-  // Startanzeige
   lcd.print("Luegendetektor");
   delay(2000);
-
   lcd.clear();
 
-  // Idle Anzeige anzeigen
-  showIdle();
+  lcd.print("Start druecken");
 }
 
 // ================= LOOP =================
 void loop() {
 
-  // Prüfen ob Button gedrückt wurde
-  handleButton();
+  handleStartButton();
+  handleAnswerButton();
 
-  // Prüfen ob Daten vom PC kommen
-  readSerial();
-
-  // Zustandsmaschine
   switch(currentState) {
 
     case IDLE:
-      // nichts tun
       break;
 
     case BASELINE:
-      // Grundwerte messen
       measureBaseline();
       break;
 
-    case WAIT_QUESTION:
-      // warten auf FRAGE vom PC
-      break;
-
     case WAIT_ANSWER:
-      // warten auf ANTWORT vom PC
+      // wartet auf Antwort
       break;
 
-    case MEASURE_RESPONSE:
-      // Reaktion messen
+    case MEASURE:
       measureResponse();
       break;
 
     case RESULT:
-      // wird aktuell nicht separat genutzt
+      // wird in Funktion erledigt
       break;
   }
 }
 
-// ================= BUTTON =================
-void handleButton() {
+// ================= START BUTTON =================
+void handleStartButton() {
 
-  int buttonState = digitalRead(buttonPin); // aktuellen Zustand lesen
+  int state = digitalRead(buttonStart);
 
-  // Wenn Button gedrückt wurde (HIGH → LOW)
-  if (lastButtonState == HIGH && buttonState == LOW) {
+  if (lastStartState == HIGH && state == LOW) {
 
-    currentState = BASELINE; // starte Baseline Messung
+    currentState = BASELINE;
 
     lcd.clear();
     lcd.print("Baseline...");
     delay(500);
   }
 
-  // aktuellen Zustand speichern
-  lastButtonState = buttonState;
+  lastStartState = state;
 }
 
-// ================= SERIAL =================
-void readSerial() {
+// ================= ANSWER BUTTON =================
+void handleAnswerButton() {
 
-  // prüfen ob Daten vorhanden sind
-  if (Serial.available()) {
+  int state = digitalRead(buttonAnswer);
 
-    // lese bis Zeilenende
-    inputString = Serial.readStringUntil('\n');
+  if (currentState == WAIT_ANSWER) {
 
-    // Wenn "FRAGE" empfangen wird
-    if (inputString.startsWith("FRAGE")) {
+    if (lastAnswerState == HIGH && state == LOW) {
 
-      lcd.clear();
-      lcd.print("Frage gestartet");
-
-      currentState = WAIT_ANSWER;
-    }
-
-    // Wenn "ANTWORT" empfangen wird
-    if (inputString.startsWith("ANTWORT")) {
+      // egal ob JA oder NEIN → Messung starten
+      currentState = MEASURE;
 
       lcd.clear();
-      lcd.print("Antwort...");
-      delay(1000);
+      lcd.print("Messen...");
 
-      currentState = MEASURE_RESPONSE;
+      digitalWrite(ledPin, HIGH); // LED AN
     }
   }
+
+  lastAnswerState = state;
 }
 
 // ================= BASELINE =================
@@ -168,35 +131,35 @@ void measureBaseline() {
   int sumBPM = 0;
   float sumGSR = 0;
 
-  // 20 Messungen durchführen
   for (int i = 0; i < 20; i++) {
-
-    sumBPM += readPulse(); // Puls lesen
-    sumGSR += readGSR();   // GSR lesen
-
-    delay(200); // kurze Pause
+    sumBPM += readPulse();
+    sumGSR += readGSR();
+    delay(200);
   }
 
-  // Durchschnitt berechnen
   baselineBPM = sumBPM / 20;
   baselineGSR = sumGSR / 20;
 
-  // Anzeige
   lcd.clear();
   lcd.setCursor(0,0);
-  lcd.print("Baseline OK");
-
-  lcd.setCursor(0,1);
   lcd.print("HF:");
   lcd.print(baselineBPM);
 
-  delay(2000);
+  lcd.setCursor(0,1);
+  lcd.print("GSR:");
+  lcd.print(baselineGSR, 0);
 
-  // Weiter zum nächsten Zustand
-  currentState = WAIT_QUESTION;
+  delay(3000);
 
   lcd.clear();
-  lcd.print("Warte Frage...");
+  lcd.print("Baseline OK");
+
+  delay(2000);
+
+  currentState = WAIT_ANSWER;
+
+  lcd.clear();
+  lcd.print("Frage stellen");
 }
 
 // ================= RESPONSE =================
@@ -205,31 +168,26 @@ void measureResponse() {
   int sumBPM = 0;
   float sumGSR = 0;
 
-  // 15 Messungen durchführen
   for (int i = 0; i < 15; i++) {
-
     sumBPM += readPulse();
     sumGSR += readGSR();
-
     delay(200);
   }
 
-  // Durchschnitt berechnen
   currentBPM = sumBPM / 15;
   currentGSR = sumGSR / 15;
 
-  // Ergebnis anzeigen
+  digitalWrite(ledPin, LOW); // LED AUS
+
   showResult();
 }
 
 // ================= RESULT =================
 void showResult() {
 
-  // Differenz berechnen (Veränderung)
   int deltaBPM = currentBPM - baselineBPM;
   float deltaGSR = currentGSR - baselineGSR;
 
-  // Herzfrequenz anzeigen
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("HF:");
@@ -241,7 +199,6 @@ void showResult() {
 
   delay(3000);
 
-  // GSR anzeigen
   lcd.clear();
   lcd.setCursor(0,0);
   lcd.print("GSR:");
@@ -255,69 +212,49 @@ void showResult() {
 
   lcd.clear();
 
-  // Einfache Stressbewertung
+  // Bewertung
   if (deltaBPM > 10 || deltaGSR < -1000) {
-
-    lcd.print("Stress HOCH!");
-
+    lcd.print("Verand. HOCH");
   } else {
-
-    lcd.print("Stress niedrig");
+    lcd.print("Verand. gering");
   }
 
   delay(4000);
 
-  // Zurück zum Fragen-Modus
-  currentState = WAIT_QUESTION;
+  currentState = WAIT_ANSWER;
 
   lcd.clear();
   lcd.print("Naechste Frage");
 }
 
 // ================= SENSOR =================
-
-// Puls messen
 int readPulse() {
 
-  int signal = analogRead(pulsePin); // Signal lesen
+  int signal = analogRead(pulsePin);
 
-  // Schwellenwert für Herzschlag
   if (signal > 600) {
 
     unsigned long now = millis();
 
-    // Mindestabstand zwischen Schlägen
     if (now - lastBeat > 300) {
 
-      // BPM berechnen
       int bpm = 60000 / (now - lastBeat);
-
       lastBeat = now;
 
       return bpm;
     }
   }
 
-  return 0; // kein gültiger Wert
+  return 0;
 }
 
-// GSR messen
 float readGSR() {
 
-  int value = analogRead(gsrPin); // Rohwert
+  int value = analogRead(gsrPin);
 
-  // Spannung berechnen
   float voltage = value * (5.0 / 1023.0);
 
-  // Widerstand berechnen (Formel)
   float resistance = (5.0 - voltage) * 10000 / voltage;
 
   return resistance;
-}
-
-// ================= DISPLAY =================
-void showIdle() {
-
-  lcd.setCursor(0,0);
-  lcd.print("Taste starten");
 }
