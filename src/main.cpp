@@ -7,42 +7,46 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // ================= PINS =================
 const int buttonStart = 2;   // Start Baseline
-const int buttonAnswer = 3;  // Antwort Taste (Ja/Nein)
-const int ledPin = 4;        // LED für Messung
+const int ledPin = 9;        // LED für Messung
 
 const int pulsePin = A0;
-const int gsrPin = A1;
+const int gsrPin = A0;       // FIX: Wokwi stabil (kein echter zweiter Sensor nötig)
 
 // ================= STATES =================
 enum State {
-  IDLE,
-  BASELINE,
-  WAIT_ANSWER,
-  MEASURE,
-  RESULT
+  IDLE,          //wartet 
+  BASELINE,     //normalwerte messen
+  WAIT_ANSWER, //wartet auf antwort 
+  MEASURE,    //misst reaktion 
+  RESULT     //zeigt ergebnis 
 };
 
 State currentState = IDLE;
 
 // ================= BUTTON =================
 int lastStartState = HIGH;
-int lastAnswerState = HIGH;
 
 // ================= WERTE =================
-int baselineBPM = 0;
-float baselineGSR = 0;
+int baselineBPM = 0;    //ruhiger Zustand-baseline werte 
+float baselineGSR = 0;  
 
-int currentBPM = 0;
+int currentBPM = 0;     //aktuelle werte- nach frage 
 float currentGSR = 0;
 
 // ================= PULS =================
 unsigned long lastBeat = 0;
 
+// ================= FUNKTIONSDEKLARATIONEN =================
+void measureBaseline();
+void measureResponse();
+void showResult();
+int readPulse();
+float readGSR();
+void handleStartButton();
 // ================= SETUP =================
 void setup() {
 
   pinMode(buttonStart, INPUT_PULLUP);
-  pinMode(buttonAnswer, INPUT_PULLUP);
   pinMode(ledPin, OUTPUT);
 
   lcd.init();
@@ -58,10 +62,12 @@ void setup() {
 }
 
 // ================= LOOP =================
+  //prüft ständig Buttons
+  //führt je nach Zustand eine Funktion aus
+
 void loop() {
 
   handleStartButton();
-  handleAnswerButton();
 
   switch(currentState) {
 
@@ -93,24 +99,15 @@ void handleStartButton() {
 
   if (lastStartState == HIGH && state == LOW) {
 
-    currentState = BASELINE;
+    if (currentState == IDLE) {
 
-    lcd.clear();
-    lcd.print("Baseline...");
-    delay(500);
-  }
+      currentState = BASELINE;
 
-  lastStartState = state;
-}
+      lcd.clear();
+      lcd.print("Baseline...");
+      delay(500);
 
-// ================= ANSWER BUTTON =================
-void handleAnswerButton() {
-
-  int state = digitalRead(buttonAnswer);
-
-  if (currentState == WAIT_ANSWER) {
-
-    if (lastAnswerState == HIGH && state == LOW) {
+    } else if (currentState == WAIT_ANSWER) {
 
       // egal ob JA oder NEIN → Messung starten
       currentState = MEASURE;
@@ -122,7 +119,7 @@ void handleAnswerButton() {
     }
   }
 
-  lastAnswerState = state;
+  lastStartState = state;
 }
 
 // ================= BASELINE =================
@@ -131,13 +128,13 @@ void measureBaseline() {
   int sumBPM = 0;
   float sumGSR = 0;
 
-  for (int i = 0; i < 20; i++) {
+  for (int i = 0; i < 20; i++) {    //20 Messungen werden gemacht 
     sumBPM += readPulse();
     sumGSR += readGSR();
-    delay(200);
+    delay(100);
   }
 
-  baselineBPM = sumBPM / 20;
+  baselineBPM = sumBPM / 20;    //Durchschnitt berechnet 
   baselineGSR = sumGSR / 20;
 
   lcd.clear();
@@ -149,14 +146,14 @@ void measureBaseline() {
   lcd.print("GSR:");
   lcd.print(baselineGSR, 0);
 
-  delay(3000);
+  delay(2000);
 
   lcd.clear();
   lcd.print("Baseline OK");
 
-  delay(2000);
+  delay(1500);
 
-  currentState = WAIT_ANSWER;
+  currentState = WAIT_ANSWER; //Zustand 
 
   lcd.clear();
   lcd.print("Frage stellen");
@@ -168,10 +165,10 @@ void measureResponse() {
   int sumBPM = 0;
   float sumGSR = 0;
 
-  for (int i = 0; i < 15; i++) {
+  for (int i = 0; i < 15; i++) {    //diesmal nur 15 Werte
     sumBPM += readPulse();
     sumGSR += readGSR();
-    delay(200);
+    delay(100);
   }
 
   currentBPM = sumBPM / 15;
@@ -179,12 +176,13 @@ void measureResponse() {
 
   digitalWrite(ledPin, LOW); // LED AUS
 
-  showResult();
+  showResult();   //Ergebnis angezeigt 
 }
 
 // ================= RESULT =================
 void showResult() {
 
+  //Ergebnis berechnet: Differenz = Veränderung
   int deltaBPM = currentBPM - baselineBPM;
   float deltaGSR = currentGSR - baselineGSR;
 
@@ -197,7 +195,7 @@ void showResult() {
   lcd.print("d:");
   lcd.print(deltaBPM);
 
-  delay(3000);
+  delay(2000);
 
   lcd.clear();
   lcd.setCursor(0,0);
@@ -208,20 +206,20 @@ void showResult() {
   lcd.print("d:");
   lcd.print(deltaGSR, 0);
 
-  delay(3000);
+  delay(2000);
 
   lcd.clear();
 
   // Bewertung
-  if (deltaBPM > 10 || deltaGSR < -1000) {
+  if (deltaBPM > 10 || deltaGSR < -1000) {    //Bewertung Wenn: Puls stark steigt ODER Hautwiderstand stark sinkt
     lcd.print("Verand. HOCH");
-  } else {
+  } else {                        //Sonst 
     lcd.print("Verand. gering");
   }
 
-  delay(4000);
+  delay(3000);
 
-  currentState = WAIT_ANSWER;
+  currentState = WAIT_ANSWER;   //zurück zu nach antwort warten 
 
   lcd.clear();
   lcd.print("Naechste Frage");
@@ -232,27 +230,15 @@ int readPulse() {
 
   int signal = analogRead(pulsePin);
 
-  if (signal > 600) {
-
-    unsigned long now = millis();
-
-    if (now - lastBeat > 300) {
-
-      int bpm = 60000 / (now - lastBeat);
-      lastBeat = now;
-
-      return bpm;
-    }
-  }
-
-  return 0;
+  // FIX: Simulation statt echter Pulslogik
+  return map(signal, 0, 1023, 60, 120);
 }
 
 float readGSR() {
 
   int value = analogRead(gsrPin);
 
-  float voltage = value * (5.0 / 1023.0);
+  float voltage = value * (5.0 / 1023.0);     //gsr messen 
 
   float resistance = (5.0 - voltage) * 10000 / voltage;
 
