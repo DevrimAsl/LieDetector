@@ -10,7 +10,7 @@ const int buttonStart = 2;   // Start Baseline
 const int ledPin = 9;        // LED für Messung
 
 const int pulsePin = A0;
-const int gsrPin = A0;       // FIX: Wokwi stabil (kein echter zweiter Sensor nötig)
+const int gsrPin = A0;      
 
 // ================= STATES =================
 enum State {
